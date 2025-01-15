@@ -1,24 +1,61 @@
 <?php
 
+use App\Http\Controllers\AsistenManagerController;
 use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\KaryawanController;
+use App\Http\Controllers\HelperController;
+use App\Http\Controllers\ManagerController;
+use App\Http\Controllers\OfficerController;
+use App\Http\Middleware\CheckRole;
 use Illuminate\Foundation\Application;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::get('/', function () {
-    return Inertia::render('Welcome', [
+    if (!Auth::check()) {
+        // Jika user belum login, arahkan ke halaman login
+        return redirect()->route('login');
+    }
+
+    // Jika user sudah login, cek role dari session
+    $selectedRole = session('selected_role');
+
+    // Arahkan berdasarkan role yang sudah disimpan di session
+    switch ($selectedRole) {
+        case 'Helper':
+            return redirect()->route('dashboard.helper');
+        case 'Officer':
+            return redirect()->route('dashboard.officer');
+        case 'Asisten Manager':
+            return redirect()->route('dashboard.asistenmanager');
+        case 'Manager':
+            return redirect()->route('dashboard.manager');
+        default:
+            // Jika role tidak ditemukan, arahkan ke login
+            return redirect()->route('login');
+    }
+});
+
+
+Route::get('/', function(){
+    return Inertia::render('Welcome',[
         'canLogin' => Route::has('login'),
         'canRegister' => Route::has('register'),
-        'laravelVersion' => Application::VERSION,
+        'laravelVersi   on' => Application::VERSION,
         'phpVersion' => PHP_VERSION,
     ]);
 });
 
+Route::get('/dashboard', function () {
+    return Inertia::render('Dashboard');
+})->middleware(['auth', 'verified'])->name('dashboard');
+
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::get('/dashboard', function () {
-        return Inertia::render('Dashboard');
-    })->name('dashboard');
+    Route::get('/Helper/dashboard', [HelperController::class,'index'])->middleware(CheckRole::class.':Helper')->name('dashboard.helper');
+    Route::get('/Officer/dashboard', [OfficerController::class,'index'])->middleware(CheckRole::class.':Officer')->name('dashboard.officer');
+    Route::get('/AsistenManager/dashboard', [AsistenManagerController::class,'index'])->middleware(CheckRole::class.':Asisten Manager')->name('dashboard.asistenmanager');
+    Route::get('/Manager/dashboard', [ManagerController::class,'index'])->middleware(CheckRole::class.':Manager')->name('dashboard.manager');
+    Route::get('/Officer/KelolaKaryawan/', [OfficerController::class, 'kelolaKaryawan'])->middleware(CheckRole::class.':Officer')->name('kelolaKaryawan.officer');
 
     // Profile routes
     Route::controller(ProfileController::class)->group(function () {
@@ -27,18 +64,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::delete('/profile', 'destroy')->name('profile.destroy');
     });
 
-    // Karyawan routes
-    Route::controller(KaryawanController::class)->group(function () {
-        Route::get('/karyawan', 'index')->name('karyawan.index');
-        Route::post('/karyawan', 'store')->name('karyawan.store');
-        Route::put('/karyawan/{id}', 'update')->name('karyawan.update');
-        Route::delete('/karyawan/{id}', 'destroy')->name('karyawan.destroy');
-        Route::get('/karyawan/export', 'exportCsv')->name('karyawan.export');
-        Route::post('/karyawan/import',  'importCsv')->name('karyawan.import');
-        Route::get('/kelola-karyawan', function () {
-            return Inertia::render('KelolaKaryawan/KelolaKaryawan');
-        })->middleware(['auth', 'verified'])->name('kelola-karyawan');
-            });
+    
+    
 });
 
 require __DIR__.'/auth.php';
