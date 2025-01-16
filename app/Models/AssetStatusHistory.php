@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class AssetStatusHistory extends Model
 {
+    protected $table='asset_status_history';
     protected $fillable = [
         'asset_id',
         'status_lama',

@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class AssetProcurement extends Model
 {
+    protected $table='asset_procurement';
     protected $fillable = [
         'asset_id',
         'pr_awal',

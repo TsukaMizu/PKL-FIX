@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class AssetAssignment extends Model
 {
+    protected $table='asset_assignments';
     protected $fillable = [
         'asset_id',
         'employee_id',

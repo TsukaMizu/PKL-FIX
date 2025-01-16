@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class Employee extends Model
 {
+    protected $table = 'employees';
     protected $fillable = [
         'nama',
         'nip',
@@ -15,9 +16,6 @@ class Employee extends Model
         'is_active'
     ];
 
-    protected $casts = [
-        'is_active' => 'boolean'
-    ];
 
     public function assets()
     {

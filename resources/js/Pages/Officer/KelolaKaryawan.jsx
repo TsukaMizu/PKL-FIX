@@ -44,7 +44,7 @@ function KelolaKaryawan({ employees, filters, perPageOptions }) {
 
     const handleSearch = (e) => {
         router.get(
-            route('officer.kelola-karyawan'),
+            route('kelolaKaryawan.officer'),
             { ...filters, search: e.target.value, page: 1 },
             { preserveState: true }
         );
@@ -52,7 +52,7 @@ function KelolaKaryawan({ employees, filters, perPageOptions }) {
 
     const handlePerPageChange = (value) => {
         router.get(
-            route('officer.kelola-karyawan'),
+            route('kelolaKaryawan.officer'),
             { ...filters, per_page: value, page: 1 },
             { preserveState: true }
         );
@@ -76,7 +76,7 @@ function KelolaKaryawan({ employees, filters, perPageOptions }) {
         }
 
         if (editingEmployee) {
-            router.put(route('officer.update-karyawan', editingEmployee.id), data, {
+            router.put(route('updateKaryawan.officer', editingEmployee.id), data, {
                 onSuccess: () => {
                     setIsEditModalOpen(false);
                     setEditingEmployee(null);
@@ -88,7 +88,7 @@ function KelolaKaryawan({ employees, filters, perPageOptions }) {
                 }
             });
         } else {
-            router.post(route('officer.store-karyawan'), data, {
+            router.post(route('storeKaryawan.officer'), data, {
                 onSuccess: () => {
                     setIsCreateModalOpen(false);
                     resetForm();
@@ -125,7 +125,7 @@ function KelolaKaryawan({ employees, filters, perPageOptions }) {
             cancelButtonText: 'Batal'
         }).then((result) => {
             if (result.isConfirmed) {
-                router.delete(route('officer.destroy-karyawan', employee.id), {
+                router.delete(route('destroyKaryawan.officer', employee.id), {
                     onSuccess: () => {
                         Swal.fire('Terhapus!', 'Data karyawan berhasil dihapus.', 'success');
                     }
@@ -145,67 +145,75 @@ function KelolaKaryawan({ employees, filters, perPageOptions }) {
     };
 
     const EmployeeForm = () => (
-        <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-                <label htmlFor="nama" className="text-sm font-medium">Nama Karyawan</label>
-                <Input
-                    id="nama"
-                    type="text"
-                    placeholder="Masukkan nama karyawan"
-                    value={data.nama}
-                    onChange={e => setData({ ...data, nama: e.target.value })}
-                />
-            </div>
-
-            <div className="space-y-2">
-                <label htmlFor="nip" className="text-sm font-medium">NIP</label>
-                <Input
-                    id="nip"
-                    type="text"
-                    placeholder="Masukkan NIP"
-                    value={data.nip}
-                    onChange={e => setData({ ...data, nip: e.target.value })}
-                />
-            </div>
-
-            <div className="space-y-2">
-                <label htmlFor="jabatan" className="text-sm font-medium">Jabatan</label>
-                <Input
-                    id="jabatan"
-                    type="text"
-                    placeholder="Masukkan jabatan"
-                    value={data.jabatan}
-                    onChange={e => setData({ ...data, jabatan: e.target.value })}
-                />
-            </div>
-
-            <div className="space-y-2">
-                <label htmlFor="divisi" className="text-sm font-medium">Divisi</label>
-                <Input
-                    id="divisi"
-                    type="text"
-                    placeholder="Masukkan divisi"
-                    value={data.divisi}
-                    onChange={e => setData({ ...data, divisi: e.target.value })}
-                />
-            </div>
-
-            <div className="space-y-2">
-                <label htmlFor="email" className="text-sm font-medium">Email</label>
-                <Input
-                    id="email"
-                    type="email"
-                    placeholder="Masukkan email"
-                    value={data.email}
-                    onChange={e => setData({ ...data, email: e.target.value })}
-                />
-            </div>
-
-            <Button type="submit" className="w-full">
-                {editingEmployee ? 'Update Karyawan' : 'Tambah Karyawan'}
-            </Button>
+        <form onSubmit={handleSubmit} className="space-y-4 bg-white p-6 rounded-lg shadow-md">
+          <div className="space-y-2 ">
+            <label htmlFor="nama" className="text-sm font-medium">Nama Karyawan</label>
+            <Input
+              id="nama"
+              type="text"
+              placeholder="Masukkan nama karyawan"
+              value={data.nama}
+              onChange={e => setData({ ...data, nama: e.target.value })}
+              className="w-full"
+            />
+          </div>
+      
+          <div className="space-y-2">
+            <label htmlFor="nip" className="text-sm font-medium">NIP</label>
+            <Input
+              id="nip"
+              type="text"
+              placeholder="Masukkan NIP"
+              value={data.nip}
+              onChange={e => setData({ ...data, nip: e.target.value })}
+              className="w-full"
+            />
+          </div>
+      
+          <div className="space-y-2">
+            <label htmlFor="jabatan" className="text-sm font-medium">Jabatan</label>
+            <Input
+              id="jabatan"
+              type="text"
+              placeholder="Masukkan jabatan"
+              value={data.jabatan}
+              onChange={e => setData({ ...data, jabatan: e.target.value })}
+              className="w-full"
+            />
+          </div>
+      
+          <div className="space-y-2">
+            <label htmlFor="divisi" className="text-sm font-medium">Divisi</label>
+            <Input
+              id="divisi"
+              type="text"
+              placeholder="Masukkan divisi"
+              value={data.divisi}
+              onChange={e => setData({ ...data, divisi: e.target.value })}
+              className="w-full"
+            />
+          </div>
+      
+          <div className="space-y-2">
+            <label htmlFor="email" className="text-sm font-medium">Email</label>
+            <Input
+              id="email"
+              type="email"
+              placeholder="Masukkan email"
+              value={data.email}
+              onChange={e => setData({ ...data, email: e.target.value })}
+              className="w-full"
+            />
+          </div>
+      
+          <Button 
+            type="submit" 
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            {editingEmployee ? 'Update Karyawan' : 'Tambah Karyawan'}
+          </Button>
         </form>
-    );
+      );
 
     return (
         <AuthenticatedLayout role = "Officer">
@@ -220,9 +228,9 @@ function KelolaKaryawan({ employees, filters, perPageOptions }) {
                         <DialogTrigger asChild>
                             <Button>Tambah Karyawan</Button>
                         </DialogTrigger>
-                        <DialogContent>
-                            <DialogHeader>
-                                <DialogTitle>Tambah Karyawan Baru</DialogTitle>
+                        <DialogContent className='bg-white'>
+                            <DialogHeader className=' items-center'>
+                                <DialogTitle><br/>Tambah Karyawan Baru</DialogTitle>
                             </DialogHeader>
                             <EmployeeForm />
                         </DialogContent>
