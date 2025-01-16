@@ -7,53 +7,62 @@ use Illuminate\Database\Eloquent\Model;
 class Asset extends Model
 {
     protected $fillable = [
-        'nama_barang',
+        'kode_asset',
+        'item_id',
+        'serial_number',
+        'nip',
+        'computer_name',
+        'tahun_inventaris',
+        'os_status',
+        'office_status',
+        'office_365_status',
+        'email_365_status',
+        'no_at',
+        'tanggal_terima',
+        'tanggal_kembali',
         'status',
-        'current_employee_id',
-        'is_active'
+        'wellness',
+        'riwayat_perbaikan',
+        'pr_awal',
+        'pr_line',
+        'judul_pr',
+        'po_awal',
+        'tanggal_datang_koperasi',
+        'tanggal_kembali_koperasi',
+        'catatan'
     ];
 
     protected $casts = [
-        'is_active' => 'boolean'
+        'tahun_inventaris' => 'integer',
+        'tanggal_terima' => 'date',
+        'tanggal_kembali' => 'date',
+        'tanggal_datang_koperasi' => 'date',
+        'tanggal_kembali_koperasi' => 'date',
+        'wellness' => 'integer'
     ];
 
-    public function currentEmployee()
+    public function item()
     {
-        return $this->belongsTo(Employee::class, 'current_employee_id');
+        return $this->belongsTo(Item::class);
     }
 
-    public function location()
+    public function employee()
     {
-        return $this->hasOne(AssetLocation::class);
+        return $this->belongsTo(Employee::class, 'nip', 'nip');
     }
 
-    public function specification()
+    public function loans()
     {
-        return $this->hasOne(AssetSpecification::class);
+        return $this->hasMany(AssetLoan::class);
     }
 
-    public function software()
+    public function maintenanceRecords()
     {
-        return $this->hasOne(AssetSoftware::class);
+        return $this->hasMany(MaintenanceRecord::class);
     }
 
-    public function assignments()
+    public function currentLoan()
     {
-        return $this->hasMany(AssetAssignment::class);
-    }
-
-    public function repairs()
-    {
-        return $this->hasMany(AssetRepair::class);
-    }
-
-    public function procurement()
-    {
-        return $this->hasOne(AssetProcurement::class);
-    }
-
-    public function statusHistory()
-    {
-        return $this->hasMany(AssetStatusHistory::class);
+        return $this->loans()->where('status', 'dipinjam')->latest()->first();
     }
 }

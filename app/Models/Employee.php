@@ -3,27 +3,52 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Employee extends Model
 {
-    protected $table = 'employees';
     protected $fillable = [
-        'nama',
         'nip',
-        'jabatan',
-        'divisi',
+        'nama',
         'email',
+        'division',
+        'jabatan',
+        'lokasi_gedung',
+        'lokasi_ruang',
+        'group_asman',
         'is_active'
     ];
 
+    protected $casts = [
+        'is_active' => 'boolean'
+    ];
 
-    public function assets()
+    // Relasi dengan Asset Allocation
+    public function assetAllocation()
     {
-        return $this->hasMany(Asset::class, 'current_employee_id');
+        return $this->hasOne(AssetAllocation::class, 'nip', 'nip');
     }
 
-    public function assetAssignments()
+    // Relasi dengan Asset Loans
+    public function assetLoans()
     {
-        return $this->hasMany(AssetAssignment::class);
+        return $this->hasMany(AssetLoan::class, 'nip', 'nip');
+    }
+
+    // Relasi dengan Assets
+    public function assets()
+    {
+        return $this->hasMany(Asset::class, 'nip', 'nip');
+    }
+
+    // Relasi self-referential untuk Asman
+    public function asman()
+    {
+        return $this->belongsTo(Employee::class, 'group_asman', 'nip');
+    }
+
+    public function staff()
+    {
+        return $this->hasMany(Employee::class, 'group_asman', 'nip');
     }
 }
