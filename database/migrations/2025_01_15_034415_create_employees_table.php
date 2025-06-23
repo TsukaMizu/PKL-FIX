@@ -16,12 +16,11 @@ return new class extends Migration
             $table->string('nip')->unique();
             $table->string('nama');
             $table->string('email')->unique();
-            $table->string('division');
+            $table->string('divisi');
             $table->string('jabatan');
             $table->string('lokasi_gedung')->nullable();
             $table->string('lokasi_ruang')->nullable();
             $table->string('group_asman')->nullable();
-            $table->boolean('is_active')->default(true);
             $table->timestamps();
             $table->softDeletes();
         });

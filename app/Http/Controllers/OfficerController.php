@@ -2,130 +2,900 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Employee;
+use App\Models\Category;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
+use App\Models\CategoryTask;
+use App\Models\Employee;
+use Illuminate\Support\Facades\Hash;
+use App\Http\Controllers\Controller;
+use App\Models\Item;
+use Illuminate\Validation\ValidationException;
+use \Illuminate\Support\Facades\Auth;
+use \Illuminate\Support\Facades\Log;
+use App\Models\ItemStock;
+use App\Models\User;
+use App\Models\Role;
+use App\Models\Task;
+use App\Http\Requests\ProfileUpdateRequest;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Http\RedirectResponse; 
+use Illuminate\Support\Facades\Redirect; 
+use Inertia\Response;
+ 
 
 
 class OfficerController extends Controller
 {
-    // Display a listing of the resource
-    public function index(){
+    public function dashboard()
+    {
+        $startDate = request('start_date', now()->startOfMonth());
+        $endDate = request('end_date', now()->endOfMonth());
+        $userId = Auth::id();
 
-        $user = Auth::user();
-        $roles = session('selected_role', 'default');
-        
-        return Inertia::render('Officer/dashboard',[
-            'user' => $user,
-            'roles' => $roles
+        try {
+            $stats = [
+                'overview' => [
+                    'my_tasks' => Task::where('karyawan_id', $userId)->count(),
+                    'pending_tasks' => Task::where('karyawan_id', $userId)
+                        ->where('status', 'Pending')
+                        ->count(),
+                    'completed_tasks' => Task::where('karyawan_id', $userId)
+                        ->where('status', 'Close')
+                        ->count(),
+                    // Menghilangkan filter by user untuk items karena tidak ada kolom user_id
+                    'items_handled' => ItemStock::sum('barang_masuk'),
+                ],
+                'tasks' => [
+                    'status_distribution' => Task::where('karyawan_id', $userId)
+                        ->select('status', DB::raw('count(*) as count'))
+                        ->groupBy('status')
+                        ->get(),
+                    'monthly_trends' => Task::where('karyawan_id', $userId)
+                        ->select(
+                            DB::raw('DATE_FORMAT(tanggal_laporan, "%Y-%m") as month'),
+                            DB::raw('count(*) as count')
+                        )
+                        ->groupBy('month')
+                        ->orderBy('month')
+                        ->get(),
+                    'category_distribution' => Task::where('karyawan_id', $userId)
+                        ->join('category_task', 'task.kategori_id', '=', 'category_task.id')
+                        ->select('category_task.tugas as name', DB::raw('count(*) as count'))
+                        ->groupBy('category_task.id', 'category_task.tugas')
+                        ->get(),
+                ],
+                'inventory' => [
+                    'total_items' => ItemStock::sum('barang_masuk'),
+                    'available_items' => DB::raw('SUM(barang_masuk - barang_dipinjam)'),
+                    'borrowed_items' => ItemStock::sum('barang_dipinjam'),
+                    'category_distribution' => DB::table('item_stocks')
+                        ->join('category', 'item_stocks.kategori_id', '=', 'category.id')
+                        ->select(
+                            'category.nama as name',
+                            DB::raw('sum(barang_masuk) as total'),
+                            DB::raw('sum(barang_dipinjam) as borrowed')
+                        )
+                        ->groupBy('category.id', 'category.nama')
+                        ->get(),
+                ],
+                'recent_activity' => collect()
+                    ->concat(
+                        Task::with(['karyawan', 'kategori'])
+                            ->where('karyawan_id', $userId)
+                            ->orderBy('created_at', 'desc')
+                            ->limit(5)
+                            ->get()
+                            ->map(function($task) {
+                                return [
+                                    'type' => 'task',
+                                    'description' => "Task: {$task->kategori->tugas}",
+                                    'category' => optional($task->kategori)->tugas ?? 'Uncategorized',
+                                    'status' => $task->status,
+                                    'timestamp' => $task->created_at,
+                                ];
+                            })
+                    ),
+                'filters' => [
+                    'categories' => CategoryTask::orderBy('tugas')->get(),
+                    'statuses' => ['Close', 'Cancel', 'Pending'],
+                    'date_ranges' => [
+                        'today' => [now()->format('Y-m-d'), now()->format('Y-m-d')],
+                        'week' => [now()->startOfWeek()->format('Y-m-d'), now()->endOfWeek()->format('Y-m-d')],
+                        'month' => [now()->startOfMonth()->format('Y-m-d'), now()->endOfMonth()->format('Y-m-d')],
+                        'year' => [now()->startOfYear()->format('Y-m-d'), now()->endOfYear()->format('Y-m-d')],
+                    ],
+                ],
+            ];
+
+            // Hitung available_items dengan benar
+            $stats['inventory']['available_items'] = ItemStock::selectRaw('SUM(barang_masuk - barang_dipinjam) as available')
+                ->value('available') ?? 0;
+
+            return Inertia::render('Officer/dashboard', [
+                'stats' => $stats,
+                'currentTime' => now()->setTimezone('UTC')->format('Y-m-d H:i:s'),
+                'currentUser' => Auth::user()->name,
+                'filters' => [
+                    'startDate' => $startDate->format('Y-m-d'),
+                    'endDate' => $endDate->format('Y-m-d'),
+                    'category' => request('category', ''),
+                    'status' => request('status', ''),
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            // Log error
+            Log::error('Dashboard Error: ' . $e->getMessage());
+            
+            // Return empty stats if there's an error
+            return Inertia::render('Officer/dashboard', [
+                'stats' => [
+                    'overview' => [
+                        'my_tasks' => 0,
+                        'pending_tasks' => 0,
+                        'completed_tasks' => 0,
+                        'items_handled' => 0,
+                    ],
+                    'tasks' => [
+                        'status_distribution' => [],
+                        'monthly_trends' => [],
+                        'category_distribution' => [],
+                    ],
+                    'inventory' => [
+                        'total_items' => 0,
+                        'available_items' => 0,
+                        'borrowed_items' => 0,
+                        'category_distribution' => [],
+                    ],
+                    'recent_activity' => [],
+                    'filters' => [
+                        'categories' => [],
+                        'statuses' => ['Close', 'Cancel', 'Pending'],
+                        'date_ranges' => [
+                            'today' => [now()->format('Y-m-d'), now()->format('Y-m-d')],
+                            'week' => [now()->startOfWeek()->format('Y-m-d'), now()->endOfWeek()->format('Y-m-d')],
+                            'month' => [now()->startOfMonth()->format('Y-m-d'), now()->endOfMonth()->format('Y-m-d')],
+                            'year' => [now()->startOfYear()->format('Y-m-d'), now()->endOfYear()->format('Y-m-d')],
+                        ],
+                    ],
+                ],
+                'currentTime' => now()->setTimezone('UTC')->format('Y-m-d H:i:s'),
+                'currentUser' => Auth::user()->name,
+                'error' => 'Failed to load dashboard data'
+            ]);
+        }
+    }
+
+    public function taskindex()
+    {
+        $categories = CategoryTask::select('id', 'tugas')
+        ->orderBy('tugas')
+        ->get();
+        Log::info('Categories loaded:', $categories->toArray());
+        return Inertia::render('Officer/Task/Index', [
+            'tasks' => Task::with(['karyawan', 'kategori'])
+                ->orderBy('created_at', 'desc')
+                ->get(),
+            'employees' => Employee::select('id', 'nama', 'lokasi_ruang', 'lokasi_gedung')
+            ->orderBy('nama')
+            ->get(),
+           'categories' => $categories,
         ]);
     }
-        
-    public function kelolaKaryawan(Request $request)
+
+    public function taskstore(Request $request)
     {
-        $query = Employee::query();
-        
-        // Search
-        if ($request->has('search')) {
-            $searchTerm = $request->search;
-            $query->where(function($q) use ($searchTerm) {
-                $q->where('nama', 'like', "%{$searchTerm}%")
-                  ->orWhere('nip', 'like', "%{$searchTerm}%")
-                  ->orWhere('jabatan', 'like', "%{$searchTerm}%")
-                  ->orWhere('divisi', 'like', "%{$searchTerm}%");
-            });
+        $validated = $request->validate([
+            'karyawan_id' => 'required|exists:employees,id',
+            'kategori_id' => 'required|exists:category_task,id',
+            'trouble' => 'required|string', 
+            'solusi' => 'required|string',
+            'status' => 'required|in:Close,Cancel,Pending',
+            'keterangan' => 'required|string'
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            $task = Task::create([
+                ...$validated,
+                'tanggal_laporan' => now()
+            ]);
+
+            DB::commit();
+
+            return redirect()->back()
+                ->with('success', 'Task created successfully');
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return redirect()->back()
+                ->with('error', 'Failed to create task: ' . $e->getMessage());
+        }
+    }
+
+    public function taskupdate(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'karyawan_id' => 'required|exists:employees,id',
+            'kategori_id' => 'required|exists:category_task,id',
+            'trouble' => 'required|string',
+            'solusi' => 'required|string',
+            'status' => 'required|in:Close,Cancel,Pending',
+            'keterangan' => 'required|string'
+        ]);
+
+        try {
+            DB::beginTransaction();
+            $task = Task::findOrFail($id);
+            $task->update($validated);
+
+            DB::commit();
+
+            return redirect()->back()
+                ->with('success', 'Task updated successfully');
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return redirect()->back()
+                ->with('error', 'Failed to update task: ' . $e->getMessage());
+        }
+    }
+
+    public function taskdestroy($id)
+    {
+        try {
+            DB::beginTransaction();
+            Task::findOrFail($id)->delete();
+            DB::commit();
+
+            return redirect()->back()
+                ->with('success', 'Task deleted successfully');
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return redirect()->back()
+                ->with('error', 'Failed to delete task: ' . $e->getMessage());
+        }
+    }
+
+    public function stockindex()
+{
+    return Inertia::render('Officer/ItemStock/Index', [
+        'stocks' => ItemStock::with(['specification', 'category','items'])->get(),
+        'categories' => Category::all(),
+        'currentTime' => now()->setTimezone('UTC')->format('Y-m-d H:i:s'),
+    ]);
+}
+
+public function stockstore(Request $request)
+{
+    try {
+        DB::beginTransaction();
+
+        // Create ItemStock
+        $itemStock = ItemStock::create([
+            'nama_barang' => $request->nama_barang,
+            'kategori_id' => $request->kategori_id,
+            'barang_masuk' => $request->barang_masuk,
+            'status_inventaris' => $request->status_inventaris,
+            'stok' => $request->barang_masuk,
+            'barang_dipinjam' => 0
+        ]);
+
+        // Create Specification
+        $itemStock->specification()->create([
+            'merk' => $request->merk,
+            'warna' => $request->warna,
+            'spesifikasi' => $request->spesifikasi,
+            'tahun_inventaris' => $request->tahun_inventaris,
+            'os' => $request->os,
+            'office' => $request->office,
+            'office_365' => $request->office_365,
+            'email_365' => $request->email_365
+        ]);
+        $specificationId = $itemStock->specification->id;
+        // Generate items menggunakan model Item
+        $items = [];
+        for ($i = 0; $i < $request->barang_masuk; $i++) {
+            $items[] = [
+                'item_stock_id' => $itemStock->id,
+                'item_specification_id' => $specificationId,
+                'serial_number' => null,
+                'status' => 'bagus',
+                'created_at' => now(),
+                'updated_at' => now()
+            ];
         }
 
-        // Per page options
-        $perPage = $request->input('per_page', 10);
-        $allowedPerPage = [10, 25, 50, 100];
-        $perPage = in_array($perPage, $allowedPerPage) ? $perPage : 10;
+        // Bulk insert items
+        Item::insert($items);
+        DB::commit();
+        return redirect()->back()->with('success', 'Item stock created successfully');
 
-        $employees = $query->orderBy('nama')
-                          ->paginate($perPage)
-                          ->withQueryString();
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return redirect()->back()->withErrors(['error' => $e->getMessage()]);
+    }
+}
 
-        return Inertia::render('Officer/KelolaKaryawan', [
-            'employees' => $employees,
-            'filters' => $request->only(['search', 'per_page']),
-            'perPageOptions' => $allowedPerPage
-        ]);
+    // Controller untuk mengecek ketersediaan
+    public function checkAvailability($id)
+    {
+        try {
+            $itemStock = ItemStock::findOrFail($id);
+            return response()->json([
+                'Available' => $itemStock->stok - $itemStock->barang_dipinjam,
+                'total' => $itemStock->barang_masuk,
+                'borrowed' => $itemStock->barang_dipinjam
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to check availability'
+            ], 500);
+        }
     }
 
-    public function storeKaryawan(Request $request)
+    public function stockupdate(Request $request, $id)
     {
         $validated = $request->validate([
-            'nama' => 'required|string|max:255',
-            'nip' => 'required|string|unique:employees,nip|max:255',
-            'jabatan' => 'required|string|max:255',
-            'divisi' => 'required|string|max:255',
-            'email' => 'nullable|email|max:255'
+            'nama_barang' => 'required|string|max:255',
+            'kategori_id' => 'required|exists:categories,id',
+            'barang_masuk' => 'required|integer|min:1',
+            'status_inventaris' => 'required|in:Sewa,Milik',
+            'specification' => 'required|array',
+            'specification.merk' => 'required|string|max:255',
+            'specification.warna' => 'required|string|max:255',
+            'specification.spesifikasi' => 'required|string',
+            'specification.tahun_inventaris' => 'required|integer|min:2000|max:2099',
+            'specification.os' => 'required|in:Windows 11,Windows 10,Linux,MacOS,Other',
+            'specification.office' => 'required|boolean',
+            'specification.office_365' => 'required|boolean',
+            'specification.email_365' => 'required|boolean'
         ]);
 
-        Employee::create($validated);
+        try {
+            DB::beginTransaction();
 
-        return redirect()->back()
-                        ->with('message', 'Karyawan berhasil ditambahkan');
+            $itemStock = ItemStock::findOrFail($id);
+            
+            // Update ItemStock
+            $itemStock->update([
+                'nama_barang' => $validated['nama_barang'],
+                'kategori_id' => $validated['kategori_id'],
+                'barang_masuk' => $validated['barang_masuk'],
+                'status_inventaris' => $validated['status_inventaris']
+            ]);
+
+            // Update specification
+            if ($itemStock->specification) {
+                $itemStock->specification->update($validated['specification']);
+            } else {
+                $itemStock->specification()->create($validated['specification']);
+            }
+
+            DB::commit();
+
+            return redirect()->back()->with('success', 'Item stock updated successfully');
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return redirect()->back()->withErrors([
+                'error' => 'Failed to update item stock: ' . $e->getMessage()
+            ]);
+        }
     }
 
-    public function updateKaryawan(Request $request, Employee $employee)
+    public function stockdestroy($id)
     {
-        $validated = $request->validate([
-            'nama' => 'required|string|max:255',
-            'nip' => 'required|string|max:255|unique:employees,nip,'.$employee->id,
-            'jabatan' => 'required|string|max:255',
-            'divisi' => 'required|string|max:255',
-            'email' => 'nullable|email|max:255'
-        ]);
+        try {
+            DB::beginTransaction();
 
-        $employee->update($validated);
+            $itemStock = ItemStock::findOrFail($id);
+            
+            // Check if any items are borrowed
+            if ($itemStock->barang_dipinjam > 0) {
+                return redirect()->back()->withErrors([
+                    'error' => 'Cannot delete item stock while items are borrowed'
+                ]);
+            }
 
-        return redirect()->back()
-                        ->with('message', 'Data karyawan berhasil diperbarui');
+            // Delete related records and the item stock
+            if ($itemStock->specification) {
+                $itemStock->specification->delete();
+            }
+            $itemStock->items()->delete();
+            $itemStock->delete();
+
+            DB::commit();
+
+            return redirect()->back()->with('success', 'Item stock deleted successfully');
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return redirect()->back()->withErrors([
+                'error' => 'Failed to delete item stock: ' . $e->getMessage()
+            ]);
+        }
     }
+    public function updateSerialNumbers(Request $request, $id)
+{
+    try {
+        DB::beginTransaction();
 
-    public function destroyKaryawan(Employee $employee)
-    {
-        $employee->delete();
+        $itemStock = ItemStock::findOrFail($id);
         
-        return redirect()->back()
-                        ->with('message', 'Karyawan berhasil dihapus');
+        // Cek duplikasi dalam request
+        $duplicatesInRequest = array_diff_key(
+            $request->serial_numbers, 
+            array_unique($request->serial_numbers)
+        );
+        if (!empty($duplicatesInRequest)) {
+            throw new \Exception('Duplicate serial numbers found in your input');
+        }
+
+        // Cek serial number yang sudah ada
+        $existingSerialNumbers = Item::whereIn('serial_number', $request->serial_numbers)
+            ->pluck('serial_number')
+            ->toArray();
+        
+        if (!empty($existingSerialNumbers)) {
+            throw new \Exception('Serial number(s) ' . implode(', ', $existingSerialNumbers) . ' already exist in database');
+        }
+
+        $items = Item::where('item_stock_id', $id)
+                    ->whereNull('serial_number')
+                    ->limit(count($request->serial_numbers))
+                    ->get();
+
+        if ($items->count() < count($request->serial_numbers)) {
+            throw new \Exception('Not enough items available for serial number assignment');
+        }
+
+        // Update serial numbers
+        foreach ($items as $index => $item) {
+            $item->update([
+                'serial_number' => $request->serial_numbers[$index]
+            ]);
+        }
+
+        DB::commit();
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Successfully added ' . count($request->serial_numbers) . ' serial numbers',
+            'item_name' => $itemStock->nama_barang,
+            'total_registered' => Item::where('item_stock_id', $id)
+                                    ->whereNotNull('serial_number')
+                                    ->count(),
+            'total_items' => $itemStock->barang_masuk
+        ]);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json([
+            'success' => false,
+            'message' => $e->getMessage()
+        ], 422);
+    }
+}
+
+public function getItemsWithoutSN($id)
+{
+    try {
+        $items = Item::where('item_stock_id', $id)
+                    ->whereNull('serial_number')
+                    ->get();
+
+        return response()->json([
+            'success' => true,
+            'items' => $items,
+            'count' => $items->count(),
+
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch items: ' . $e->getMessage(),
+        ], 500);
+    }
+}
+public function itemindex()
+    {
+        return Inertia::render('Officer/Items/Index', [
+            'items' => Item::with(['itemStock', 'specification', 'employee'])
+                ->get()
+                ->map(function ($item) {
+                    return [
+                        'id' => $item->id,
+                        'nama_barang' => $item->itemStock->nama_barang,
+                        'kategori' => $item->itemStock->category->nama,
+                        'merk' => $item->specification->merk,
+                        'warna' => $item->specification->warna,
+                        'serial_number' => $item->serial_number,
+                        'spesifikasi' => $item->specification->spesifikasi,
+                        'tahun_inventaris' => $item->specification->tahun_inventaris,
+                        'os_status' => $item->specification->os,
+                        'office_status' => $item->specification->office ? 'Yes' : 'No',
+                        'office_365_status' => $item->specification->office_365 ? 'Yes' : 'No',
+                        'email_365_status' => $item->specification->email_365 ? 'Yes' : 'No',
+                        'status' => $item->status,
+                        'wellness' => $item->wellness,
+                        'employee' => $item->employee ? [
+                            'id' => $item->employee->id,
+                            'nama' => $item->employee->nama,
+                            'nip' => $item->employee->nip,
+                            'divisi' => $item->employee->divisi,
+                            'jabatan' => $item->employee->jabatan,
+                            'lokasi' => $item->employee->lokasi_gedung . ' - ' . $item->employee->lokasi_ruang,
+                        ] : null,
+                        'tanggal_terima' => $item->tanggal_terima,
+                        'tanggal_kembali' => $item->tanggal_kembali,
+                        'riwayat_pemakai' => $item->riwayat_pemakai ?? [],
+                        'riwayat_perbaikan' => $item->riwayat_perbaikan ?? [],
+                        'catatan' => $item->catatan,
+                        'created_by' => $item->created_by,
+                        'updated_by' => $item->updated_by,
+                        'created_at' => $item->created_at,
+                        'updated_at' => $item->updated_at,
+                    ];
+                }),
+            'employees' => Employee::select('id', 'nama', 'nip', 'divisi', 'jabatan')
+                ->get()
+                ->map(function ($employee) {
+                    return [
+                        'value' => $employee->id,
+                        'label' => "{$employee->nama} - {$employee->divisi} ({$employee->nip})"
+                    ];
+                }),
+            'currentTime' => now()->setTimezone('UTC')->format('Y-m-d H:i:s'),
+            'currentUser' => Auth::user()->name
+        ]);
     }
 
-    // Show the form for creating a new resource
-    public function create()
+    public function borrowItem(Request $request, Item $item)
     {
-        //
+        try {
+            DB::beginTransaction();
+            
+            // Lock the row untuk mencegah race condition
+            $item = Item::lockForUpdate()->find($item->id);
+            
+            if ($item->employee_id) {
+                throw new \Exception('Item is already borrowed by someone else.');
+            }
+
+            $validated = $request->validate([
+                'employee_id' => 'required|exists:employees,id',
+                'item_id' => 'required|exists:items,id'
+            ]);
+
+            // Validate item status
+            if ($item->status !== 'bagus') {
+                throw new \Exception('Item cannot be borrowed because its status is ' . $item->status);
+            }
+
+            $employee = Employee::findOrFail($validated['employee_id']);
+            
+            // Update item
+            $item->employee_id = $employee->id;
+            $item->tanggal_terima = now();
+            
+            // Update riwayat_pemakai
+            $history = $item->riwayat_pemakai ?? [];
+            $history[] = [
+                'nama' => $employee->nama,
+                'tanggal_terima' => now()->toDateTimeString(),
+                'tanggal_kembali' => null
+            ];
+            $item->riwayat_pemakai = $history;
+            $item->updated_by = Auth::user()->name;
+            
+            $item->save();
+
+            DB::commit();
+            return response()->json(['message' => 'Item has been borrowed successfully.']);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['error' => $e->getMessage()], 400);
+        }
     }
 
-    // Store a newly created resource in storage
-    public function store(Request $request)
+    public function updateStatus(Request $request, Item $item)
     {
-        //
+        try {
+            $validated = $request->validate([
+                'status' => 'required|in:bagus,rusak,hilang,unknown',
+                'wellness' => 'required|integer|min:0|max:100',
+                'repair_note' => 'nullable|string'
+            ]);
+
+            DB::beginTransaction();
+
+            // Update riwayat_perbaikan jika ada repair_note
+            if (!empty($validated['repair_note'])) {
+                $repairHistory = $item->riwayat_perbaikan ?? [];
+                $repairHistory[] = [
+                    'tanggal' => now()->toDateTimeString(),
+                    'keterangan' => $validated['repair_note'],
+                    'updated_by' => Auth::user()->name
+                ];
+                $item->riwayat_perbaikan = $repairHistory;
+            }
+
+            $item->status = $validated['status'];
+            $item->wellness = $validated['wellness'];
+            $item->updated_by = Auth::user()->name;
+            $item->save();
+
+            DB::commit();
+            return response()->json(['message' => 'Status updated successfully']);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['error' => $e->getMessage()], 400);
+        }
     }
 
-    // Display the specified resource
-    public function show($id)
+
+    public function returnItem(Item $item)
+{
+    try {
+        DB::beginTransaction();
+
+        // Lock the row untuk mencegah race condition
+        $item = Item::lockForUpdate()->find($item->id);
+
+        if (!$item->employee_id) {
+            throw new \Exception('Item is not currently borrowed.');
+        }
+
+        // Update riwayat_pemakai
+        $history = $item->riwayat_pemakai ?? [];
+        if (!empty($history)) {
+            $lastIndex = count($history) - 1;
+            $history[$lastIndex]['tanggal_kembali'] = now()->toDateTimeString();
+        }
+
+        // Update item
+        $item->employee_id = null;
+        $item->tanggal_kembali = now();
+        $item->riwayat_pemakai = $history;
+        $item->updated_by = Auth::user()->name;
+        $item->save();
+
+        DB::commit();
+        return response()->json(['message' => 'Item has been returned successfully.']);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        Log::error('Return error:', [
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        return response()->json(['error' => $e->getMessage()], 400);
+    }
+}
+
+    public function getEmployees(Request $request)
     {
-        //
+        return response()->json(
+            Employee::where('nama', 'like', "%{$request->search}%")
+                ->orWhere('nip', 'like', "%{$request->search}%")
+                ->select('id', 'nama', 'nip', 'divisi', 'jabatan')
+                ->get()
+                ->map(function ($employee) {
+                    return [
+                        'value' => $employee->id,
+                        'label' => "{$employee->nama} - {$employee->divisi} ({$employee->nip})"
+                    ];
+                })
+        );
     }
 
-    // Show the form for editing the specified resource
-    public function edit($id)
+    public function employeeindex()
     {
-        //
+        $employees = Employee::query()
+            ->select('id', 'nip', 'nama', 'email', 'divisi', 'jabatan', 'lokasi_gedung', 'lokasi_ruang', 'group_asman')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return Inertia::render('Officer/Employees/Index', [
+            'employees' => $employees
+        ]);
     }
 
-    // Update the specified resource in storage
-    public function update(Request $request, $id)
+    public function employeestore(Request $request)
     {
-        //
+        $validated = $request->validate([
+            'nip' => 'required|string|unique:employees',
+            'nama' => 'required|string|max:255',
+            'email' => 'required|email|unique:employees',
+            'divisi' => 'required|string',
+            'jabatan' => 'required|string',
+            'lokasi_gedung' => 'required|string',
+            'lokasi_ruang' => 'required|string',
+            'group_asman' => 'required|string',
+        ]);
+
+        try {
+            DB::beginTransaction();
+            Employee::create($validated);
+            DB::commit();
+            return redirect()->back()->with('success', 'Employee created successfully');
+        } catch (\Exception $e) {
+            DB::rollback();
+            return redirect()->back()->with('error', 'Failed to create employee');
+        }
     }
 
-    // Remove the specified resource from storage
-    public function destroy($id)
+    public function employeeupdate(Request $request, $id)
     {
-        //
+        $validated = $request->validate([
+            'nip' => 'required|string|unique:employees,nip,'.$id,
+            'nama' => 'required|string|max:255',
+            'email' => 'required|email|unique:employees,email,'.$id,
+            'divisi' => 'required|string',
+            'jabatan' => 'required|string',
+            'lokasi_gedung' => 'required|string',
+            'lokasi_ruang' => 'required|string',
+            'group_asman' => 'required|string',
+        ]);
+
+        try {
+            DB::beginTransaction();
+            $employee = Employee::findOrFail($id);
+            $employee->update($validated);
+            DB::commit();
+            return redirect()->back()->with('success', 'Employee updated successfully');
+        } catch (\Exception $e) {
+            DB::rollback();
+            return redirect()->back()->with('error', 'Failed to update employee');
+        }
+    }
+
+    public function employeedestroy($id)
+    {
+        try {
+            DB::beginTransaction();
+            Employee::findOrFail($id)->delete();
+            DB::commit();
+            return redirect()->back()->with('success', 'Employee deleted successfully');
+        } catch (\Exception $e) {
+            DB::rollback();
+            return redirect()->back()->with('error', 'Failed to delete employee');
+        }
+    }
+
+    public function ctindex()
+    {
+        $categoriestask = CategoryTask::query()
+            ->select('id', 'tugas')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return Inertia::render('Officer/CategoriesTask/Index', [
+            'category_task' => $categoriestask
+        ]);
+    }
+
+    public function ctstore(Request $request)
+    {
+        $validated = $request->validate([
+            'tugas' => 'required|string|max:255'
+        ]);
+
+        try {
+            DB::beginTransaction();
+            CategoryTask::create($validated);
+            DB::commit();
+
+            return redirect()->back()->with('success', 'Category Task created successfully');
+        } catch (\Exception $e) {
+            DB::rollback();
+            return redirect()->back()->with('error', 'Failed to create category Task');
+        }
+    }
+
+    public function ctupdate(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'tugas' => 'required|string|max:255'
+        ]);
+
+        try {
+            DB::beginTransaction();
+            $categorytask = CategoryTask::findOrFail($id);
+            $categorytask->update($validated);
+            DB::commit();
+
+            return redirect()->back()->with('success', 'Category Task updated successfully');
+        } catch (\Exception $e) {
+            DB::rollback();
+            return redirect()->back()->with('error', 'Failed to update category task');
+        }
+    }
+
+    public function ctdestroy($id)
+    {
+        try {
+            DB::beginTransaction();
+            CategoryTask::findOrFail($id)->delete();
+            DB::commit();
+
+            return redirect()->back()->with('success', 'Category Task deleted successfully');
+        } catch (\Exception $e) {
+            DB::rollback();
+            return redirect()->back()->with('error', 'Failed to delete category task');
+        }
+    }
+    public function cindex()
+    {
+        $categories = Category::query()
+            ->select('id', 'nama', 'kode', 'deskripsi')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return Inertia::render('Officer/Categories/Index', [
+            'categories' => $categories
+        ]);
+    }
+
+    public function cstore(Request $request)
+    {
+        $validated = $request->validate([
+            'nama' => 'required|string|max:255',
+            'kode' => 'required|string|max:255|unique:categories',
+            'deskripsi' => 'nullable|string'
+        ]);
+
+        try {
+            DB::beginTransaction();
+            Category::create($validated);
+            DB::commit();
+
+            return redirect()->back()->with('success', 'Category created successfully');
+        } catch (\Exception $e) {
+            DB::rollback();
+            return redirect()->back()->with('error', 'Failed to create category');
+        }
+    }
+
+    public function cupdate(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'nama' => 'required|string|max:255',
+            'kode' => "required|string|max:255|unique:categories,kode,{$id}",
+            'deskripsi' => 'nullable|string'
+        ]);
+
+        try {
+            DB::beginTransaction();
+            $category = Category::findOrFail($id);
+            $category->update($validated);
+            DB::commit();
+
+            return redirect()->back()->with('success', 'Category updated successfully');
+        } catch (\Exception $e) {
+            DB::rollback();
+            return redirect()->back()->with('error', 'Failed to update category');
+        }
+    }
+
+    public function cdestroy($id)
+    {
+        try {
+            DB::beginTransaction();
+            Category::findOrFail($id)->delete();
+            DB::commit();
+
+            return redirect()->back()->with('success', 'Category deleted successfully');
+        } catch (\Exception $e) {
+            DB::rollback();
+            return redirect()->back()->with('error', 'Failed to delete category');
+        }
     }
 }

@@ -12,8 +12,8 @@ class Category extends Model
         'deskripsi'
     ];
 
-    public function items()
+    public function itemstocks()
     {
-        return $this->hasMany(Item::class);
-    }
+        return $this->hasMany(ItemStock::class, 'kategori_id');
+    }   
 }

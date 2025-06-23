@@ -1,54 +1,36 @@
 <?php
 
 namespace App\Models;
-
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Employee extends Model
 {
+    use HasFactory, SoftDeletes;
+
+    protected $table = 'employees';
+
     protected $fillable = [
         'nip',
         'nama',
         'email',
-        'division',
+        'divisi',
         'jabatan',
         'lokasi_gedung',
         'lokasi_ruang',
         'group_asman',
-        'is_active'
     ];
 
-    protected $casts = [
-        'is_active' => 'boolean'
-    ];
-
-    // Relasi dengan Asset Allocation
-    public function assetAllocation()
+    public function items()
     {
-        return $this->hasOne(AssetAllocation::class, 'nip', 'nip');
+        return $this->hasMany(Item::class, 'employee_id');
     }
 
-    // Relasi dengan Asset Loans
-    public function assetLoans()
+    // Tambahkan relasi dengan Task
+    public function tasks()
     {
-        return $this->hasMany(AssetLoan::class, 'nip', 'nip');
+        return $this->hasMany(Task::class, 'karyawan_id');
     }
 
-    // Relasi dengan Assets
-    public function assets()
-    {
-        return $this->hasMany(Asset::class, 'nip', 'nip');
-    }
-
-    // Relasi self-referential untuk Asman
-    public function asman()
-    {
-        return $this->belongsTo(Employee::class, 'group_asman', 'nip');
-    }
-
-    public function staff()
-    {
-        return $this->hasMany(Employee::class, 'group_asman', 'nip');
-    }
 }

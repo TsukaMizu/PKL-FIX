@@ -3,49 +3,48 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Item extends Model
 {
     protected $fillable = [
-        'kode_item',
-        'nama',
-        'category_id',
-        'merk',
-        'tipe',
-        'spesifikasi',
-        'os',
-        'os_version',
-        'has_office',
-        'office_version',
-        'has_office_365',
-        'has_email_365',
-        'jumlah_total',
-        'jumlah_tersedia',
-        'minimum_stok',
-        'harga_per_unit',
-        'satuan',
-        'keterangan'
+        'item_stock_id',
+        'item_specification_id',
+        'serial_number',
+        'employee_id',
+        'tanggal_terima',
+        'tanggal_kembali',
+        'status',
+        'wellness',
+        'riwayat_perbaikan',
+        'riwayat_pemakai',
+        'catatan',
+        'created_by',
+        'updated_by',
+        'serial_number_added_at'
     ];
 
     protected $casts = [
-        'has_office' => 'boolean',
-        'has_office_365' => 'boolean',
-        'has_email_365' => 'boolean',
-        'harga_per_unit' => 'decimal:2'
+        'tanggal_terima' => 'datetime',
+        'tanggal_kembali' => 'datetime',
+        'serial_number_added_at' => 'datetime',
+        'riwayat_perbaikan' => 'array',
+        'riwayat_pemakai' => 'array'
     ];
 
-    public function category()
+    public function itemStock(): BelongsTo
     {
-        return $this->belongsTo(Category::class);
+        return $this->belongsTo(ItemStock::class);
     }
 
-    public function assets()
+    public function specification(): BelongsTo
     {
-        return $this->hasMany(Asset::class);
+        return $this->belongsTo(ItemSpecification::class, 'item_specification_id');
     }
 
-    public function movements()
+    public function employee(): BelongsTo
     {
-        return $this->hasMany(ItemMovement::class);
+        return $this->belongsTo(Employee::class);
     }
+   
 }
